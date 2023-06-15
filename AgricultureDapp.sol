@@ -1,101 +1,83 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity >=0.4.22 <0.9.0;
 
-contract AgricultureDApp {
-    struct Participant {
-        uint256 id;
-        uint256 balance;
-        uint256 ranking;
-        address sensorAddress;
+contract SensorRanking {
+    struct Sensor {
+        string sensorId;
+        int totalWeight;
     }
 
-    struct MoistureReading {
-        uint256 timestamp;
-        uint256 moisturePercentage;
-    }
-
-    mapping(address => Participant) public participants;
-    mapping(address => MoistureReading[]) public moistureReadings;
-    mapping(address => string) public ipfsHashes; // Mapping to store IPFS hashes
-    address[] public rankedSensors;
-
-    event Reward(address indexed participant, uint256 amount);
-    event Punishment(address indexed participant, uint256 amount);
+    Sensor[] public sensors;
+    mapping(string => uint) public sensorIndex;
+    uint public centralWeightPool = 50000;
 
     constructor() {
-        // Initialize participants and their initial balances
-        participants[msg.sender] = Participant(1, 0, 0, msg.sender);
-        rankedSensors.push(msg.sender);
+        addSensorReading("Sensor1", 3600, 600);
+        addSensorReading("Sensor1", 3500, 650);
+        addSensorReading("Sensor1", 3700, 550);
+
+        addSensorReading("Sensor2", 4000, 700);
+        addSensorReading("Sensor2", 3900, 600);
+        addSensorReading("Sensor2", 4100, 550);
+
+        addSensorReading("Sensor3", 3100, 500);
+        addSensorReading("Sensor3", 3000, 600);
+        addSensorReading("Sensor3", 3200, 550);
     }
 
-    modifier onlyParticipant() {
-        require(participants[msg.sender].id != 0, "Only participants can call this function");
-        _;
+    function calculateWeight(int moisture, int ph) private pure returns (int) {
+        int moistureWeight = (3000 <= moisture && moisture <= 10000) ? int(100) : int(-100);
+        int phWeight = (5500 <= ph && ph <= 6500) ? int(50) : int(-50);
+        return moistureWeight + phWeight;
     }
 
-    function addMoistureReading(uint256 _timestamp, uint256[] calldata _moisturePercentages) external onlyParticipant {
-        require(_moisturePercentages.length == 3, "Invalid moisture reading");
+    function addSensorReading(string memory sensorId, int moisture, int ph) public {
+        int weight = calculateWeight(moisture, ph);
 
-        // Store the moisture readings for each sensor
-        MoistureReading[] storage readings = moistureReadings[msg.sender];
-        for (uint256 i = 0; i < _moisturePercentages.length; i++) {
-            readings.push(MoistureReading(_timestamp, _moisturePercentages[i]));
-        }
-
-        // Store the IPFS hash associated with the readings
-        ipfsHashes[msg.sender] = "QmehRink16TsE1SVyfDTxByhBFezWsGNo4cdfk1mfNrygf";
-
-        // Check if the moisture percentage is less than 30% for more than a day
-        if (checkMoistureThreshold(msg.sender)) {
-            // Penalize participant and emit Punishment event
-            uint256 punishmentAmount = 100; // Set the punishment amount (adjust accordingly)
-            participants[msg.sender].balance -= punishmentAmount;
-            emit Punishment(msg.sender, punishmentAmount);
+        if (sensorIndex[sensorId] > 0) {
+            sensors[sensorIndex[sensorId] - 1].totalWeight += weight;
         } else {
-            // Reward participant and emit Reward event
-            uint256 rewardAmount = 100; // Set the reward amount (adjust accordingly)
-            participants[msg.sender].balance += rewardAmount;
-            emit Reward(msg.sender, rewardAmount);
+            sensors.push(Sensor(sensorId, weight));
+            sensorIndex[sensorId] = sensors.length;
         }
 
-        updateRankings();
-    }
-
-    function updateRankings() internal {
-        for (uint256 i = rankedSensors.length - 1; i > 0; i--) {
-            address currentSensor = rankedSensors[i];
-            address previousSensor = rankedSensors[i - 1];
-
-            if (participants[currentSensor].balance > participants[previousSensor].balance) {
-                rankedSensors[i] = previousSensor;
-                rankedSensors[i - 1] = currentSensor;
-            } else {
-                break;
-            }
-        }
-
-        // Update rankings in Participant struct
-        for (uint256 i = 0; i < rankedSensors.length; i++) {
-            participants[rankedSensors[i]].ranking = i + 1;
+        if (weight > 0) {
+            centralWeightPool -= uint(weight);
+        } else {
+            centralWeightPool += uint(-weight);
         }
     }
 
-    function checkMoistureThreshold(address _sensorAddress) internal view returns (bool) {
-        MoistureReading[] storage readings = moistureReadings[_sensorAddress];
-        uint256 currentTime = block.timestamp;
-        uint256 count = 0;
-
-        for (uint256 i = 0; i < readings.length; i++) {
-            if (currentTime - readings[i].timestamp <= 1 days && readings[i].moisturePercentage < 35) {
-                count++;
-                if (count >= 3) {
-                    return true;
+    function sortSensors() public {
+        uint n = sensors.length;
+        for(uint i = 0; i < n; i++) {
+            for(uint j = 0; j < n - i - 1; j++) {
+                if(sensors[j].totalWeight < sensors[j + 1].totalWeight) {
+                    Sensor memory temp = sensors[j];
+                    sensors[j] = sensors[j + 1];
+                    sensors[j + 1] = temp;
                 }
-            } else {
-                count = 0;
             }
         }
+    }
 
-        return false;
+    function getSensorCount() public view returns (uint) {
+        return sensors.length;
+    }
+
+    function getSensor(uint index) public view returns (string memory, int) {
+        return (sensors[index].sensorId, sensors[index].totalWeight);
+    }
+    
+    function getSortedSensors() public view returns (string[] memory) {
+        string[] memory sensorIds = new string[](sensors.length);
+        for (uint i = 0; i < sensors.length; i++) {
+            sensorIds[i] = sensors[i].sensorId;
+        }
+        return sensorIds;
+    }
+
+    function getCentralWeightPool() public view returns (uint) {
+        return centralWeightPool;
     }
 }
